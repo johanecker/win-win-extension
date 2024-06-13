@@ -1,0 +1,58 @@
+body {
+    width: 200px; /* Ensures the popup is not too wide */
+    font-family: 'Roboto', sans-serif;
+    background-color: #f1f3f4;
+    margin: 0;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.container {
+    text-align: center;
+    width: 100%;
+}
+
+.button {
+    background-color: white;
+    color: #202124;
+    border: 1px solid #dadce0;
+    border-radius: 20px;
+    padding: 8px 0;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    margin: 5px 0;
+    width: calc(100% - 20px); /* Ensure buttons have equal margins on both sides */
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.3s, box-shadow 0.3s;
+}
+
+.button:hover {
+    background-color: #f8f9fa;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+.button:active {
+    background-color: #f1f3f4;
+}
+
+.button.disabled {
+    background-color: #e0e0e0; /* Light grey when disabled */
+    color: #a0a0a0; /* Grey text when disabled */
+    cursor: not-allowed; /* Change cursor to not-allowed when disabled */
+    pointer-events: none;
+}
+
+.tagline {
+    font-size: 9px;
+    color: #5f6368;
+    margin: 10px 0 0;
+    width: calc(100% - 20px); /* Ensure tagline has equal margins on both sides */
+    box-sizing: border-box;
+    text-align: center;
+}
