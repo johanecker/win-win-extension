@@ -12,10 +12,9 @@
 
 ## Installation
 
-1. Open the [Chrome Web Store](https://chrome.google.com/webstore).
-2. Search for "Win Win".
-3. Click "Add to Chrome".
-4. Confirm by clicking "Add extension".
+1. Open the [Chrome Web Store](https://chromewebstore.google.com/detail/win-win/cacgeaapncpnnnbigaaiebjkbogejkmm).
+2. Click "Add to Chrome".
+3. Confirm by clicking "Add extension".
 
 ## Usage
 
