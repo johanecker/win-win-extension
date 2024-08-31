@@ -1,58 +1,71 @@
+/* Basic reset and container styling */
 body {
-    width: 200px; /* Ensures the popup is not too wide */
-    font-family: 'Roboto', sans-serif;
-    background-color: #f1f3f4;
-    margin: 0;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+  width: 200px; /* Fixed width for the popup */
+  font-family: "Roboto", sans-serif; /* Consistent font usage */
+  background-color: #f1f3f4; /* Light grey background */
+  margin: 0;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center; /* Center content vertically */
+  box-sizing: border-box; /* Ensure padding doesn't affect width */
 }
 
+/* Central container to align content */
 .container {
-    text-align: center;
-    width: 100%;
+  text-align: center;
+  width: 100%;
+  padding: 0; /* Remove padding from container */
+  margin: 0; /* Remove margin from container */
+  box-sizing: border-box; /* Ensure no extra space due to padding */
 }
 
+/* Styling for buttons */
 .button {
-    background-color: white;
-    color: #202124;
-    border: 1px solid #dadce0;
-    border-radius: 20px;
-    padding: 8px 0;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    margin: 5px 0;
-    width: calc(100% - 20px); /* Ensure buttons have equal margins on both sides */
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color 0.3s, box-shadow 0.3s;
+  background-color: white; /* White background for buttons */
+  color: #202124; /* Dark text color */
+  border: 1px solid #dadce0; /* Light grey border */
+  border-radius: 20px; /* Rounded corners */
+  padding: 8px 0; /* Vertical padding */
+  font-size: 12px;
+  font-weight: 500; /* Medium font weight */
+  cursor: pointer;
+  margin: 5px 0; /* Vertical spacing between buttons */
+  width: 100%; /* Full width of the container */
+  max-width: 180px; /* Ensure the buttons are not too wide */
+  box-sizing: border-box; /* Ensure padding doesn't affect width */
+  display: flex;
+  align-items: center;
+  justify-content: center; /* Center text horizontally */
+  transition: background-color 0.3s, box-shadow 0.3s; /* Smooth transitions */
 }
 
+/* Hover effect for buttons */
 .button:hover {
-    background-color: #f8f9fa;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+  background-color: #f8f9fa; /* Slightly darker grey on hover */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24); /* Subtle shadow */
 }
 
+/* Active button state */
 .button:active {
-    background-color: #f1f3f4;
+  background-color: #f1f3f4; /* Reset background on click */
 }
 
+/* Disabled button state */
 .button.disabled {
-    background-color: #e0e0e0; /* Light grey when disabled */
-    color: #a0a0a0; /* Grey text when disabled */
-    cursor: not-allowed; /* Change cursor to not-allowed when disabled */
-    pointer-events: none;
+  background-color: #e0e0e0; /* Light grey background when disabled */
+  color: #a0a0a0; /* Grey text when disabled */
+  cursor: not-allowed; /* Change cursor to not-allowed */
+  pointer-events: none; /* Prevent interaction */
 }
 
+/* Styling for the tagline */
 .tagline {
-    font-size: 9px;
-    color: #5f6368;
-    margin: 10px 0 0;
-    width: calc(100% - 20px); /* Ensure tagline has equal margins on both sides */
-    box-sizing: border-box;
-    text-align: center;
+  font-size: 9px; /* Small font size for tagline */
+  color: #5f6368; /* Grey text color */
+  margin: 10px 0 0; /* Top margin */
+  width: 100%; /* Full width of the container */
+  box-sizing: border-box; /* Ensure no extra space */
+  text-align: center; /* Center the tagline text */
 }
