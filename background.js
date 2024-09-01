@@ -4,6 +4,15 @@ chrome.runtime.onInstalled.addListener(() => {
   checkWindowState(); // Initial check
 });
 
+// Fallback mechanism: Update tab count every 5 seconds
+setInterval(updateTabCount, 5000);
+
+// Listen for Chrome startup
+chrome.runtime.onStartup.addListener(() => {
+  updateTabCount();
+});
+
+// Existing event listeners for other actions
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "splitTabs") {
     splitTabs(sendResponse);
@@ -32,9 +41,25 @@ function initializeEventListeners() {
 
 function updateTabCount() {
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError) {
+      console.error("Error querying tabs:", chrome.runtime.lastError.message);
+      return;
+    }
+
     const tabCount = tabs.length;
+
+    // Ensure the tab count is always a valid number
+    if (typeof tabCount !== "number" || isNaN(tabCount)) {
+      console.error("Invalid tab count:", tabCount);
+      chrome.action.setBadgeText({ text: "" }); // Clear badge on error
+      return;
+    }
+
+    console.log(`Tab count updated to: ${tabCount}`); // Debugging output
+
+    // Update the badge text only if there's a valid tab count
     chrome.action.setBadgeText({ text: tabCount.toString() });
-    chrome.action.setBadgeBackgroundColor({ color: "#616161" }); // Set the badge background color to a gray color
+    chrome.action.setBadgeBackgroundColor({ color: "#616161" });
   });
 }
 
