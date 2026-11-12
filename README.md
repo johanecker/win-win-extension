@@ -4,7 +4,15 @@
 
 **Win Win** is a Chrome extension designed to enhance multitasking by managing your browser windows. Split your current window into two balanced windows or merge multiple windows into one with a single click. The extension also displays a real-time tab count on the icon.
 
-## Latest Update (v1.0.2)
+## Latest Update (v1.0.3)
+
+- **Tab count stays accurate:** The badge now keeps updating after Chrome restarts or the background worker goes idle.
+- **More reliable merging:** Merge now finishes positioning the merged window, works when windows sit at the screen's left edge or on another monitor, and skips app, popup and incognito windows it can't merge.
+- **Better window placement:** Windows now respect the macOS menu bar and Dock and stay on the monitor they're on. Split and merge also work on maximized or fullscreen windows.
+- **Tab groups are kept** when splitting and merging.
+- **Fewer permissions:** The "Read your browsing history" warning is gone.
+
+## Previous Update (v1.0.2)
 
 - **Minor Bugfixes:** Addressed small issues to improve overall functionality and stability.
 

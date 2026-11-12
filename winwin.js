@@ -1,36 +1,48 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", async () => {
   const splitTabsButton = document.getElementById("split-tabs");
   const mergeWindowsButton = document.getElementById("merge-windows");
 
-  if (splitTabsButton && mergeWindowsButton) {
-    splitTabsButton.addEventListener("click", function () {
-      chrome.runtime.sendMessage({ action: "splitTabs" }, closePopup);
-    });
-
-    mergeWindowsButton.addEventListener("click", function () {
-      chrome.runtime.sendMessage({ action: "mergeWindows" }, closePopup);
-    });
-  } else {
+  if (!splitTabsButton || !mergeWindowsButton) {
     console.error("Error: Buttons not found in the popup.");
+    return;
   }
 
-  chrome.runtime.sendMessage({ action: "checkWindowState" });
+  // The browser window this popup was opened from.
+  let windowId;
+  try {
+    windowId = (await chrome.windows.getCurrent()).id;
+  } catch (error) {
+    console.error("Could not get the current window:", error);
+  }
 
-  chrome.runtime.onMessage.addListener((message) => {
-    if (message.action === "updateButtonStates") {
-      updateButtonState(splitTabsButton, message.splitTabsEnabled);
-      updateButtonState(mergeWindowsButton, message.mergeWindowsEnabled);
+  splitTabsButton.addEventListener("click", () => run("splitTabs"));
+  mergeWindowsButton.addEventListener("click", () => run("mergeWindows"));
+
+  try {
+    const state = await chrome.runtime.sendMessage({ action: "getWindowState" });
+    if (state && state.ok) {
+      updateButtonState(splitTabsButton, state.splitTabsEnabled);
+      updateButtonState(mergeWindowsButton, state.mergeWindowsEnabled);
     }
-  });
+  } catch (error) {
+    console.error("Could not get window state:", error);
+  }
 
-  function closePopup() {
+  async function run(action) {
+    updateButtonState(splitTabsButton, false);
+    updateButtonState(mergeWindowsButton, false);
+    try {
+      const response = await chrome.runtime.sendMessage({ action, windowId });
+      if (response && !response.ok) console.error(`${action} failed:`, response.error);
+    } catch (error) {
+      // The popup can close while the background is still working. That's fine.
+      console.warn(`${action}:`, error);
+    }
     window.close();
   }
 
   function updateButtonState(button, isEnabled) {
-    if (button) {
-      button.disabled = !isEnabled;
-      button.classList.toggle("disabled", !isEnabled);
-    }
+    button.disabled = !isEnabled;
+    button.classList.toggle("disabled", !isEnabled);
   }
 });

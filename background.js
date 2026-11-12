@@ -1,417 +1,255 @@
-chrome.runtime.onInstalled.addListener(() => {
-  initializeEventListeners();
-  updateTabCount();
-  checkWindowState(); // Initial check
-});
+// Win Win – background service worker (Manifest V3).
+//
+// All event listeners are registered synchronously at the top level so Chrome
+// can wake the service worker for them after it has been suspended.
 
-// Fallback mechanism: Update tab count every 5 seconds
-setInterval(updateTabCount, 5000);
+const LEFT_SHARE = 0.4; // Split: left window gets 40%, right window 60%.
+const MERGE_SHARE = 0.6; // Merge: merged window takes the right 60%.
+const BADGE_COLOR = "#616161";
+const NO_GROUP = -1; // chrome.tabGroups.TAB_GROUP_ID_NONE
 
-// Listen for Chrome startup
-chrome.runtime.onStartup.addListener(() => {
-  updateTabCount();
-});
+// ---------------------------------------------------------------------------
+// Tab-count badge
+// ---------------------------------------------------------------------------
 
-// Existing event listeners for other actions
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "splitTabs") {
-    splitTabs(sendResponse);
-  } else if (message.action === "mergeWindows") {
-    mergeWindows(sendResponse);
-  } else if (message.action === "checkWindowState") {
-    checkWindowState();
-    sendResponse(); // Respond to close the message channel
+let tabCountTimer = null;
+
+chrome.runtime.onInstalled.addListener(scheduleTabCountUpdate);
+chrome.runtime.onStartup.addListener(scheduleTabCountUpdate);
+chrome.tabs.onCreated.addListener(scheduleTabCountUpdate);
+chrome.tabs.onRemoved.addListener(scheduleTabCountUpdate);
+
+// Also refresh whenever the service worker starts for any other reason.
+scheduleTabCountUpdate();
+
+// Debounced: closing a window fires onRemoved once per tab, and tabs.query can
+// still include closing tabs for a moment.
+function scheduleTabCountUpdate() {
+  clearTimeout(tabCountTimer);
+  tabCountTimer = setTimeout(updateTabCount, 100);
+}
+
+async function updateTabCount() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+    await chrome.action.setBadgeText({ text: String(tabs.length) });
+  } catch (error) {
+    console.error("Failed to update tab count:", error);
   }
-  return true; // Keep the message channel open
+}
+
+// ---------------------------------------------------------------------------
+// Popup messaging
+// ---------------------------------------------------------------------------
+
+const handlers = {
+  getWindowState,
+  splitTabs,
+  mergeWindows,
+};
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const handler = handlers[message && message.action];
+  if (!handler) return false;
+
+  handler(message)
+    .then((result) => sendResponse({ ok: true, ...result }))
+    .catch((error) => {
+      console.error(`"${message.action}" failed:`, error);
+      sendResponse({ ok: false, error: String(error && error.message ? error.message : error) });
+    });
+  return true; // Response is sent asynchronously.
 });
 
-function initializeEventListeners() {
-  chrome.tabs.onCreated.addListener(updateTabCount);
-  chrome.tabs.onRemoved.addListener(updateTabCount);
-  chrome.tabs.onUpdated.addListener(updateTabCount);
-  chrome.windows.onCreated.addListener(() => {
-    updateTabCount();
-    checkWindowState();
-  });
-  chrome.windows.onRemoved.addListener(() => {
-    updateTabCount();
-    checkWindowState();
-  });
+// ---------------------------------------------------------------------------
+// Window helpers
+// ---------------------------------------------------------------------------
+
+// Only normal browser windows can exchange tabs (not app/PWA/popup windows).
+function getNormalWindows() {
+  return chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
 }
 
-function updateTabCount() {
-  chrome.tabs.query({}, (tabs) => {
-    if (chrome.runtime.lastError) {
-      console.error("Error querying tabs:", chrome.runtime.lastError.message);
-      return;
-    }
-
-    const tabCount = tabs.length;
-
-    // Ensure the tab count is always a valid number
-    if (typeof tabCount !== "number" || isNaN(tabCount)) {
-      console.error("Invalid tab count:", tabCount);
-      chrome.action.setBadgeText({ text: "" }); // Clear badge on error
-      return;
-    }
-
-    console.log(`Tab count updated to: ${tabCount}`); // Debugging output
-
-    // Update the badge text only if there's a valid tab count
-    chrome.action.setBadgeText({ text: tabCount.toString() });
-    chrome.action.setBadgeBackgroundColor({ color: "#616161" });
-  });
+async function getWindowState() {
+  const windows = await getNormalWindows();
+  return {
+    splitTabsEnabled: windows.length <= 1,
+    mergeWindowsEnabled: windows.length > 1,
+  };
 }
 
-function splitTabs(callback) {
-  chrome.windows.getCurrent({ populate: true }, (currentWindow) => {
-    if (chrome.runtime.lastError || !currentWindow) {
-      console.error(
-        "Error getting current window:",
-        chrome.runtime.lastError
-          ? chrome.runtime.lastError.message
-          : "No window found"
-      );
-      callback();
-      return;
-    }
+// Work area of the display that contains the window's centre (falls back to
+// the display with the largest overlap, then the primary display).
+async function getWorkArea(win) {
+  const displays = await chrome.system.display.getInfo();
+  const cx = win.left + win.width / 2;
+  const cy = win.top + win.height / 2;
 
-    chrome.storage.local.get(["lastSplitRatio"], (result) => {
-      let leftRatio = result.lastSplitRatio ? result.lastSplitRatio.left : 0.4; // Default to 40%
-      let rightRatio = result.lastSplitRatio
-        ? result.lastSplitRatio.right
-        : 0.6; // Default to 60%
-
-      let tabs = currentWindow.tabs;
-      let activeTabIndex = tabs.findIndex((tab) => tab.active);
-
-      chrome.system.display.getInfo((displays) => {
-        const screenWidth = displays[0].workArea.width;
-        const screenHeight = displays[0].workArea.height;
-        const leftWidth = Math.round(screenWidth * leftRatio);
-        const rightWidth = Math.round(screenWidth * rightRatio);
-
-        let tabIdsToMove = [];
-
-        if (tabs.length === 1) {
-          chrome.windows.create({}, (newWindow) => {
-            if (chrome.runtime.lastError || !newWindow) {
-              console.error(
-                "Error creating new window:",
-                chrome.runtime.lastError
-                  ? chrome.runtime.lastError.message
-                  : "No window found"
-              );
-              callback();
-              return;
-            }
-            resizeWindows(
-              newWindow.id,
-              currentWindow.id,
-              leftWidth,
-              rightWidth,
-              screenHeight
-            );
-            checkWindowState();
-            callback();
-          });
-        } else {
-          if (tabs.length === 2) {
-            tabIdsToMove.push(tabs[activeTabIndex].id);
-          } else {
-            for (let i = activeTabIndex; i < tabs.length; i++) {
-              tabIdsToMove.push(tabs[i].id);
-            }
-          }
-
-          chrome.windows.create({ tabId: tabIdsToMove[0] }, (newWindow) => {
-            if (chrome.runtime.lastError || !newWindow) {
-              console.error(
-                "Error creating new window with tab:",
-                chrome.runtime.lastError
-                  ? chrome.runtime.lastError.message
-                  : "No window found"
-              );
-              callback();
-              return;
-            }
-
-            if (tabIdsToMove.length > 1) {
-              chrome.tabs.move(
-                tabIdsToMove.slice(1),
-                { windowId: newWindow.id, index: -1 },
-                () => {
-                  if (chrome.runtime.lastError) {
-                    console.error(
-                      "Error moving tabs to new window:",
-                      chrome.runtime.lastError.message
-                    );
-                    callback();
-                    return;
-                  }
-
-                  chrome.tabs.query(
-                    { windowId: currentWindow.id },
-                    (remainingTabs) => {
-                      if (chrome.runtime.lastError) {
-                        console.error(
-                          "Error querying tabs in the current window:",
-                          chrome.runtime.lastError.message
-                        );
-                        callback();
-                        return;
-                      }
-
-                      if (remainingTabs.length > 0) {
-                        resizeWindows(
-                          newWindow.id,
-                          currentWindow.id,
-                          leftWidth,
-                          rightWidth,
-                          screenHeight
-                        );
-                      } else {
-                        chrome.windows.create({}, (emptyRightWindow) => {
-                          if (chrome.runtime.lastError || !emptyRightWindow) {
-                            console.error(
-                              "Error creating empty right window:",
-                              chrome.runtime.lastError
-                                ? chrome.runtime.lastError.message
-                                : "No window found"
-                            );
-                            callback();
-                            return;
-                          }
-                          resizeWindows(
-                            newWindow.id,
-                            emptyRightWindow.id,
-                            leftWidth,
-                            rightWidth,
-                            screenHeight
-                          );
-                        });
-                      }
-                      checkWindowState();
-                      callback();
-                    }
-                  );
-                }
-              );
-            } else {
-              chrome.tabs.query(
-                { windowId: currentWindow.id },
-                (remainingTabs) => {
-                  if (chrome.runtime.lastError) {
-                    console.error(
-                      "Error querying tabs in the current window:",
-                      chrome.runtime.lastError.message
-                    );
-                    callback();
-                    return;
-                  }
-
-                  if (remainingTabs.length > 0) {
-                    resizeWindows(
-                      newWindow.id,
-                      currentWindow.id,
-                      leftWidth,
-                      rightWidth,
-                      screenHeight
-                    );
-                  } else {
-                    chrome.windows.create({}, (emptyRightWindow) => {
-                      if (chrome.runtime.lastError || !emptyRightWindow) {
-                        console.error(
-                          "Error creating empty right window:",
-                          chrome.runtime.lastError
-                            ? chrome.runtime.lastError.message
-                            : "No window found"
-                        );
-                        callback();
-                        return;
-                      }
-                      resizeWindows(
-                        newWindow.id,
-                        emptyRightWindow.id,
-                        leftWidth,
-                        rightWidth,
-                        screenHeight
-                      );
-                    });
-                  }
-                  checkWindowState();
-                  callback();
-                }
-              );
-            }
-          });
-        }
-      });
-    });
-  });
-}
-
-function resizeWindows(
-  leftWindowId,
-  rightWindowId,
-  leftWidth,
-  rightWidth,
-  screenHeight
-) {
-  chrome.windows.update(
-    leftWindowId,
-    { left: 0, top: 0, width: leftWidth, height: screenHeight },
-    () => {
-      if (chrome.runtime.lastError) {
-        console.error(
-          "Error resizing left window:",
-          chrome.runtime.lastError.message
-        );
-        return;
-      }
-    }
+  const containing = displays.find(({ workArea: a }) =>
+    cx >= a.left && cx < a.left + a.width && cy >= a.top && cy < a.top + a.height
   );
-  chrome.windows.update(
-    rightWindowId,
-    { left: leftWidth, top: 0, width: rightWidth, height: screenHeight },
-    () => {
-      if (chrome.runtime.lastError) {
-        console.error(
-          "Error resizing right window:",
-          chrome.runtime.lastError.message
-        );
-        return;
+  if (containing) return containing.workArea;
+
+  const overlap = ({ workArea: a }) =>
+    Math.max(0, Math.min(win.left + win.width, a.left + a.width) - Math.max(win.left, a.left)) *
+    Math.max(0, Math.min(win.top + win.height, a.top + a.height) - Math.max(win.top, a.top));
+  const best = displays.reduce((a, b) => (overlap(b) > overlap(a) ? b : a), displays[0]);
+  if (best && overlap(best) > 0) return best.workArea;
+
+  return (displays.find((d) => d.isPrimary) || displays[0]).workArea;
+}
+
+// Bounds cannot be changed while a window is maximized, minimized or
+// fullscreen, so restore it to "normal" first.
+async function placeWindow(windowId, bounds) {
+  const win = await chrome.windows.get(windowId);
+  if (win.state !== "normal") {
+    await chrome.windows.update(windowId, { state: "normal" });
+  }
+  await chrome.windows.update(windowId, bounds);
+}
+
+// Moving tabs to another window drops them from their tab groups. Record the
+// groups up front so they can be recreated in the destination window.
+async function describeGroups(tabs) {
+  const groups = new Map();
+  for (const tab of tabs) {
+    if (tab.groupId === undefined || tab.groupId === NO_GROUP) continue;
+    if (!groups.has(tab.groupId)) {
+      let info = null;
+      try {
+        const g = await chrome.tabGroups.get(tab.groupId);
+        info = { title: g.title, color: g.color, collapsed: g.collapsed };
+      } catch (error) {
+        console.warn("Could not read tab group:", error);
       }
+      groups.set(tab.groupId, { info, tabIds: [] });
     }
+    groups.get(tab.groupId).tabIds.push(tab.id);
+  }
+  return [...groups.values()];
+}
+
+async function restoreGroups(groups, windowId) {
+  for (const { info, tabIds } of groups) {
+    try {
+      const groupId = await chrome.tabs.group({ tabIds, createProperties: { windowId } });
+      if (info) await chrome.tabGroups.update(groupId, info);
+    } catch (error) {
+      console.warn("Could not restore tab group:", error);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Split
+// ---------------------------------------------------------------------------
+
+// Moves the active tab and every tab to its right into a new window on the
+// left (40%); the original window goes on the right (60%).
+async function splitTabs({ windowId }) {
+  const currentWindow =
+    typeof windowId === "number"
+      ? await chrome.windows.get(windowId, { populate: true })
+      : await chrome.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
+
+  if (currentWindow.type !== "normal") {
+    throw new Error("Only normal browser windows can be split.");
+  }
+
+  const area = await getWorkArea(currentWindow);
+  const leftWidth = Math.round(area.width * LEFT_SHARE);
+  const leftBounds = { left: area.left, top: area.top, width: leftWidth, height: area.height };
+  const rightBounds = {
+    left: area.left + leftWidth,
+    top: area.top,
+    width: area.width - leftWidth,
+    height: area.height,
+  };
+
+  const { tabs } = currentWindow;
+  const activeIndex = Math.max(0, tabs.findIndex((tab) => tab.active));
+  // With exactly two tabs, always give each tab its own window.
+  const tabsToMove = tabs.length === 2 ? [tabs[activeIndex]] : tabs.slice(activeIndex);
+  const incognito = currentWindow.incognito;
+
+  // Nothing would stay behind (a single tab, or the first tab is active):
+  // keep all tabs together on the left and open a fresh window on the right.
+  if (tabsToMove.length === tabs.length) {
+    await placeWindow(currentWindow.id, leftBounds);
+    await chrome.windows.create({ ...rightBounds, incognito, focused: true });
+    return {};
+  }
+
+  const groups = await describeGroups(tabsToMove);
+  const newWindow = await chrome.windows.create({ tabId: tabsToMove[0].id, ...leftBounds });
+  if (tabsToMove.length > 1) {
+    await chrome.tabs.move(tabsToMove.slice(1).map((tab) => tab.id), {
+      windowId: newWindow.id,
+      index: -1,
+    });
+  }
+  await restoreGroups(groups, newWindow.id);
+
+  // Restore the originally active tab (moving tabs can change it).
+  await chrome.tabs.update(tabsToMove[0].id, { active: true });
+
+  await placeWindow(currentWindow.id, rightBounds);
+  await placeWindow(newWindow.id, leftBounds);
+  await chrome.windows.update(newWindow.id, { focused: true });
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Merge
+// ---------------------------------------------------------------------------
+
+// Moves all tabs into the right-most window and gives it the right 60% of
+// its display. Incognito and regular windows cannot share tabs, so only
+// windows matching the focused window's mode are merged.
+async function mergeWindows() {
+  const allWindows = await getNormalWindows();
+  const focused = allWindows.find((w) => w.focused) || allWindows[0];
+  if (!focused) throw new Error("No browser windows found.");
+
+  const windows = allWindows.filter((w) => w.incognito === focused.incognito);
+  if (windows.length <= 1) return { merged: 0 };
+
+  // Right-most window wins; ties go to the focused window.
+  const target = windows.reduce((best, w) =>
+    w.left > best.left || (w.left === best.left && w.focused) ? w : best
   );
 
-  // Store the user's preference for future splits
-  chrome.storage.local.set({
-    lastSplitRatio: {
-      left: leftWidth / (leftWidth + rightWidth),
-      right: rightWidth / (leftWidth + rightWidth),
-    },
-  });
-}
-
-function mergeWindows(callback) {
-  chrome.windows.getAll({ populate: true }, (windows) => {
-    if (windows.length <= 1) {
-      console.error("No windows to merge or only one window open.");
-      callback();
-      return;
-    }
-
-    chrome.system.display.getInfo((displays) => {
-      const screenWidth = displays[0].workArea.width;
-      const screenHeight = displays[0].workArea.height;
-      const mainWidth = Math.round(screenWidth * 0.6);
-
-      let mainWindow = null;
-      let rightMostPosition = 0;
-
-      for (let i = 0; i < windows.length; i++) {
-        if (windows[i].left > rightMostPosition) {
-          rightMostPosition = windows[i].left;
-          mainWindow = windows[i];
-        }
-      }
-
-      if (!mainWindow) {
-        console.error("No main window found for merging.");
-        callback();
-        return;
-      }
-
-      let remainingWindows = windows.filter((win) => win.id !== mainWindow.id);
-
-      let moveTabsPromises = remainingWindows.map((win) => {
-        let tabIdsToMove = win.tabs.map((tab) => tab.id);
-        return new Promise((resolve, reject) => {
-          chrome.tabs.move(
-            tabIdsToMove,
-            { windowId: mainWindow.id, index: -1 },
-            () => {
-              if (chrome.runtime.lastError) {
-                console.error(
-                  "Error moving tabs to main window:",
-                  chrome.runtime.lastError.message
-                );
-                reject(chrome.runtime.lastError);
-                return;
-              }
-
-              chrome.windows.get(win.id, (existingWindow) => {
-                if (chrome.runtime.lastError || !existingWindow) {
-                  console.error(
-                    "Window already removed or does not exist:",
-                    chrome.runtime.lastError
-                      ? chrome.runtime.lastError.message
-                      : "No window found"
-                  );
-                  reject(chrome.runtime.lastError);
-                  return;
-                }
-
-                chrome.windows.remove(win.id, () => {
-                  if (chrome.runtime.lastError) {
-                    console.error(
-                      "Error removing window:",
-                      chrome.runtime.lastError.message
-                    );
-                    reject(chrome.runtime.lastError);
-                    return;
-                  }
-                  resolve();
-                });
-              });
-            }
-          );
-        });
+  const errors = [];
+  for (const source of windows) {
+    if (source.id === target.id) continue;
+    try {
+      const groups = await describeGroups(source.tabs);
+      await chrome.tabs.move(source.tabs.map((tab) => tab.id), {
+        windowId: target.id,
+        index: -1,
       });
+      await restoreGroups(groups, target.id);
+      // Chrome closes the source window automatically once it is empty.
+    } catch (error) {
+      console.error(`Could not merge window ${source.id}:`, error);
+      errors.push(error);
+    }
+  }
 
-      Promise.all(moveTabsPromises)
-        .then(() => {
-          chrome.windows.update(
-            mainWindow.id,
-            {
-              left: screenWidth - mainWidth,
-              top: 0,
-              width: mainWidth,
-              height: screenHeight,
-            },
-            () => {
-              if (chrome.runtime.lastError) {
-                console.error(
-                  "Error resizing merged window:",
-                  chrome.runtime.lastError.message
-                );
-                return;
-              }
-              updateTabCount();
-              checkWindowState();
-              callback();
-            }
-          );
-        })
-        .catch((error) => {
-          console.error("Error during merge operation:", error.message);
-          callback();
-        });
-    });
+  const area = await getWorkArea(target);
+  const width = Math.round(area.width * MERGE_SHARE);
+  await placeWindow(target.id, {
+    left: area.left + area.width - width,
+    top: area.top,
+    width,
+    height: area.height,
   });
-}
+  await chrome.windows.update(target.id, { focused: true });
 
-function checkWindowState() {
-  chrome.windows.getAll({ populate: true }, (windows) => {
-    const windowCount = windows.length;
-    let hasMultipleWindows = windowCount > 1;
-    let canMerge = windowCount > 1;
-
-    chrome.runtime.sendMessage({
-      action: "updateButtonStates",
-      splitTabsEnabled: !hasMultipleWindows,
-      mergeWindowsEnabled: canMerge,
-    });
-  });
+  if (errors.length) {
+    throw new Error(`${errors.length} window(s) could not be merged: ${errors[0].message}`);
+  }
+  return { merged: windows.length - 1 };
 }
