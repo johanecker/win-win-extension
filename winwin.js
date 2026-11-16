@@ -9,8 +9,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // The browser window this popup was opened from.
   let windowId;
+  let incognito = false;
   try {
-    windowId = (await chrome.windows.getCurrent()).id;
+    const current = await chrome.windows.getCurrent();
+    windowId = current.id;
+    incognito = current.incognito;
   } catch (error) {
     console.error("Could not get the current window:", error);
   }
@@ -18,12 +21,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   splitTabsButton.addEventListener("click", () => run("splitTabs"));
   mergeWindowsButton.addEventListener("click", () => run("mergeWindows"));
 
+  // Query windows directly from the popup instead of waking the background
+  // service worker, so the button state appears instantly. Regular and
+  // incognito windows can't share tabs, so only count windows of this kind.
   try {
-    const state = await chrome.runtime.sendMessage({ action: "getWindowState" });
-    if (state && state.ok) {
-      updateButtonState(splitTabsButton, state.splitTabsEnabled);
-      updateButtonState(mergeWindowsButton, state.mergeWindowsEnabled);
-    }
+    const windows = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter(
+      (w) => w.incognito === incognito
+    );
+    updateButtonState(splitTabsButton, windows.length <= 1);
+    updateButtonState(mergeWindowsButton, windows.length > 1);
   } catch (error) {
     console.error("Could not get window state:", error);
   }

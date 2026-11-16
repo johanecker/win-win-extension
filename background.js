@@ -44,7 +44,6 @@ async function updateTabCount() {
 // ---------------------------------------------------------------------------
 
 const handlers = {
-  getWindowState,
   splitTabs,
   mergeWindows,
 };
@@ -69,14 +68,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Only normal browser windows can exchange tabs (not app/PWA/popup windows).
 function getNormalWindows() {
   return chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
-}
-
-async function getWindowState() {
-  const windows = await getNormalWindows();
-  return {
-    splitTabsEnabled: windows.length <= 1,
-    mergeWindowsEnabled: windows.length > 1,
-  };
 }
 
 // Work area of the display that contains the window's centre (falls back to
@@ -207,10 +198,14 @@ async function splitTabs({ windowId }) {
 
 // Moves all tabs into the right-most window and gives it the right 60% of
 // its display. Incognito and regular windows cannot share tabs, so only
-// windows matching the focused window's mode are merged.
-async function mergeWindows() {
+// windows matching the mode of the window the popup was opened from (or the
+// focused window) are merged.
+async function mergeWindows({ windowId }) {
   const allWindows = await getNormalWindows();
-  const focused = allWindows.find((w) => w.focused) || allWindows[0];
+  const focused =
+    allWindows.find((w) => w.id === windowId) ||
+    allWindows.find((w) => w.focused) ||
+    allWindows[0];
   if (!focused) throw new Error("No browser windows found.");
 
   const windows = allWindows.filter((w) => w.incognito === focused.incognito);
